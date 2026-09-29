@@ -38,13 +38,13 @@ let pendingSegments = 0;
 let lessonContext = [];
 let contextScreenshot = null;
 
-apiKeyInput.value = localStorage.getItem('openrouter-api-key') || localStorage.getItem('openai-api-key') || '';
+apiKeyInput.value = localStorage.getItem('inception-api-key') || '';
 $('language').value = localStorage.getItem('target-language') || 'Russian';
 $('style').value = localStorage.getItem('reply-style') || 'friendly and conversational';
 renderSavedHistory();
 updateMeter(0);
 
-apiKeyInput.addEventListener('change', () => localStorage.setItem('openrouter-api-key', apiKeyInput.value.trim()));
+apiKeyInput.addEventListener('change', () => localStorage.setItem('inception-api-key', apiKeyInput.value.trim()));
 $('language').addEventListener('change', (event) => localStorage.setItem('target-language', event.target.value));
 $('style').addEventListener('change', (event) => localStorage.setItem('reply-style', event.target.value));
 toggleButton.addEventListener('click', () => (active ? stopListening() : startListening()));
@@ -87,7 +87,7 @@ document.addEventListener('keydown', async (event) => {
 async function startListening() {
   if (!apiKeyInput.value.trim()) {
     apiKeyInput.focus();
-    showError('Сначала добавьте OpenRouter API key.');
+    showError('Сначала добавьте Inception Labs API key.');
     return;
   }
   try {

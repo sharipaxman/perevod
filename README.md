@@ -16,7 +16,7 @@
 
 ## Запуск
 
-Требуются Node.js 20+, Python 3.11+ и OpenRouter API key. Создать ключ можно в [панели OpenRouter](https://openrouter.ai/workspaces/default/keys).
+Требуются Node.js 20+, Python 3.11+ и Inception Labs API key для OpenAI-compatible API `https://api.inceptionlabs.ai/v1`.
 
 ```bash
 npm install
@@ -24,21 +24,24 @@ python -m pip install -r requirements.txt
 npm start
 ```
 
-1. Вставьте OpenRouter API key в левую панель.
+1. Вставьте Inception Labs API key в левую панель.
 2. Нажмите **«Начать слушать»**.
 3. В системном окне выберите экран и обязательно разрешите передачу системного звука.
 4. Запустите урок. Новая карточка появляется примерно каждые 6–10 секунд, если в аудио есть речь.
 
 ## Модель
 
-Перевод и варианты ответа генерирует **`openai/gpt-6-sol`** через OpenRouter. Заменить модель можно переменной окружения без правки кода:
+Перевод и варианты ответа генерирует **`mercury-2.5`** через Inception Labs OpenAI-compatible API (`https://api.inceptionlabs.ai/v1`). Заменить модель или базовый URL можно переменными окружения без правки кода:
 
 ```bash
-set ASSIST_MODEL=openai/gpt-6-luna        # Windows
-export ASSIST_MODEL=openai/gpt-6-astra    # macOS/Linux
+set ASSIST_MODEL=mercury-2.5                 # Windows
+set INCEPTION_API_BASE_URL=https://api.inceptionlabs.ai/v1
+
+export ASSIST_MODEL=mercury-2.5              # macOS/Linux
+export INCEPTION_API_BASE_URL=https://api.inceptionlabs.ai/v1
 ```
 
-Уровень рассуждений по умолчанию `none` (минимальная задержка на уроке), меняется через `ASSIST_REASONING_EFFORT`. Если провайдер не принимает поле `reasoning`, запрос автоматически повторяется без него.
+Уровень рассуждений по умолчанию `none` (минимальная задержка на уроке), меняется через `ASSIST_REASONING_EFFORT`. Если провайдер не принимает поле `reasoning` или `response_format`, запрос автоматически повторяется без неподдерживаемого поля.
 
 ## Горячие клавиши
 
@@ -61,8 +64,8 @@ export ASSIST_MODEL=openai/gpt-6-astra    # macOS/Linux
 
 ## Приватность и стоимость
 
-Распознавание аудио выполняется локально через `faster-whisper`. При первом запуске модель Whisper `base` будет скачана с Hugging Face. В OpenRouter отправляется только распознанный текст для перевода и вариантов ответа. Репозиторий не содержит API-ключей; не добавляйте их в код. Стоимость зависит от выбранной текстовой модели и тарифов OpenRouter.
+Распознавание аудио выполняется локально через `faster-whisper`. При первом запуске модель Whisper `base` будет скачана с Hugging Face. В Inception Labs отправляется только распознанный текст для перевода и вариантов ответа. Репозиторий не содержит API-ключей; не добавляйте их в код. Стоимость зависит от выбранной текстовой модели и тарифов Inception Labs.
 
 ## Стек
 
-Electron, Web Media Capture API, Python `faster-whisper` и OpenRouter Chat Completions API.
+Electron, Web Media Capture API, Python `faster-whisper` и Inception Labs OpenAI-compatible Chat Completions API.

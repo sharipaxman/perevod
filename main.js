@@ -4,8 +4,9 @@ const fs = require('fs/promises');
 const readline = require('readline');
 const path = require('path');
 
-const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
-const ASSIST_MODEL = process.env.ASSIST_MODEL || 'openai/gpt-6-sol';
+const INCEPTION_API_BASE_URL = (process.env.INCEPTION_API_BASE_URL || 'https://api.inceptionlabs.ai/v1').replace(/\/+$/, '');
+const CHAT_COMPLETIONS_URL = `${INCEPTION_API_BASE_URL}/chat/completions`;
+const ASSIST_MODEL = process.env.ASSIST_MODEL || 'mercury-2.5';
 const ASSIST_REASONING_EFFORT = process.env.ASSIST_REASONING_EFFORT || 'none';
 const TRANSCRIBE_TIMEOUT_MS = 120000;
 
@@ -162,44 +163,61 @@ async function transcribeLocally(bytes, mimeType) {
   }
 }
 
-async function openRouterRequest(apiKey, body) {
-  console.log(`OpenRouter → ${body.model}`);
+function getProviderErrorMessage(data, status) {
+  if (typeof data?.error === 'string') return data.error;
+  if (data?.error?.message) return String(data.error.message);
+  if (data?.message) return String(data.message);
+  return `HTTP ${status}`;
+}
+
+async function inceptionRequest(apiKey, body) {
+  console.log(`Inception Labs → ${body.model}`);
   const send = async (payload) => {
-    const response = await fetch(OPENROUTER_URL, {
+    const response = await fetch(CHAT_COMPLETIONS_URL, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-        'HTTP-Referer': 'https://github.com/sharipaxman/perevod',
-        'X-Title': 'English Lesson Copilot'
+        'Content-Type': 'application/json'
       },
       body: JSON.stringify(payload)
     });
-    const data = await response.json().catch(() => ({}));
+    const text = await response.text();
+    let data = {};
+    if (text) {
+      try {
+        data = JSON.parse(text);
+      } catch {
+        data = { message: text };
+      }
+    }
     return { response, data };
   };
 
-  let { response, data } = await send(body);
+  let payload = body;
+  let { response, data } = await send(payload);
 
-  // Не каждый провайдер принимает reasoning/response_format — мягко деградируем.
-  if (!response.ok && body.reasoning) {
-    const message = String(data.error?.message || '');
-    if (/reasoning|effort/i.test(message) || response.status === 400) {
-      const { reasoning, ...withoutReasoning } = body;
-      ({ response, data } = await send(withoutReasoning));
-    }
+  // Не каждый OpenAI-compatible провайдер принимает reasoning/response_format — мягко деградируем.
+  for (const field of ['reasoning', 'response_format']) {
+    if (response.ok || !payload[field]) continue;
+    const message = getProviderErrorMessage(data, response.status);
+    const mayBeUnsupportedOptionalField = response.status === 400
+      || /reasoning|effort|response_format|json_object|unsupported|unknown|extra|invalid/i.test(message);
+    if (!mayBeUnsupportedOptionalField) continue;
+    const { [field]: _ignored, ...withoutOptionalField } = payload;
+    payload = withoutOptionalField;
+    ({ response, data } = await send(payload));
   }
 
   if (!response.ok) {
-    const message = data.error?.message || `HTTP ${response.status}`;
-    console.log('OpenRouter error:', message);
-    if (/no endpoints|not exist|no allowed providers/i.test(message)) {
-      throw new Error(`Модель ${body.model} недоступна для этого ключа: ${message}`);
+    const message = getProviderErrorMessage(data, response.status);
+    console.log('Inception Labs error:', message);
+    if (/(model|модель)/i.test(message) && /not found|does not exist|not exist|unavailable|unsupported|invalid|недоступ|не найден/i.test(message)) {
+      throw new Error(`Модель ${body.model} недоступна в Inception Labs: ${message}`);
     }
-    if (/balance|credit/i.test(message)) {
-      throw new Error(`OpenRouter отклонил запрос из-за баланса: ${message}`);
+    if (/balance|credit|quota|billing/i.test(message)) {
+      throw new Error(`Inception Labs отклонил запрос из-за баланса или квоты: ${message}`);
     }
-    throw new Error(message || 'Ошибка запроса к OpenRouter.');
+    throw new Error(message || 'Ошибка запроса к Inception Labs.');
   }
   return data;
 }
@@ -270,7 +288,7 @@ ipcMain.handle('app:screenshot', async () => {
 
 ipcMain.handle('ai:assist', async (_event, payload) => {
   const { apiKey, text, targetLanguage, replyStyle, context = [], screenshot } = payload;
-  if (!apiKey) throw new Error('Добавьте OpenRouter API key в настройках.');
+  if (!apiKey) throw new Error('Добавьте Inception Labs API key в настройках.');
 
   const currentContent = [{
     type: 'text',
@@ -280,7 +298,7 @@ ipcMain.handle('ai:assist', async (_event, payload) => {
   }];
   if (screenshot) currentContent.push({ type: 'image_url', image_url: { url: screenshot } });
 
-  const data = await openRouterRequest(apiKey, {
+  const data = await inceptionRequest(apiKey, {
     model: ASSIST_MODEL,
     temperature: 0.35,
     max_tokens: 400,

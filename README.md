@@ -41,7 +41,7 @@ export ASSIST_MODEL=mercury-2.5              # macOS/Linux
 export INCEPTION_API_BASE_URL=https://api.inceptionlabs.ai/v1
 ```
 
-Уровень рассуждений по умолчанию `none` (минимальная задержка на уроке), меняется через `ASSIST_REASONING_EFFORT`. Если провайдер не принимает поле `reasoning` или `response_format`, запрос автоматически повторяется без неподдерживаемого поля.
+Уровень рассуждений по умолчанию `none` (поле `reasoning_effort` не отправляется ради минимальной задержки на уроке), меняется через `ASSIST_REASONING_EFFORT`. Если провайдер не принимает поле `reasoning_effort` или `response_format`, запрос автоматически повторяется без неподдерживаемого поля.
 
 ## Горячие клавиши
 

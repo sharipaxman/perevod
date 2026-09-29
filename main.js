@@ -170,13 +170,28 @@ function getProviderErrorMessage(data, status) {
   return `HTTP ${status}`;
 }
 
+function normalizeApiKey(value) {
+  let key = String(value || '').trim();
+  const bearerMatch = key.match(/Bearer\s+([^\s'"]+)/i);
+  if (bearerMatch) key = bearerMatch[1];
+  return key
+    .replace(/^Authorization\s*:\s*/i, '')
+    .replace(/^INCEPTION_API_KEY\s*=\s*/i, '')
+    .replace(/^Bearer\s+/i, '')
+    .replace(/^['"]|['"]$/g, '')
+    .trim();
+}
+
 async function inceptionRequest(apiKey, body) {
+  const token = normalizeApiKey(apiKey);
+  if (!token) throw new Error('Добавьте Inception Labs API key в настройках.');
+
   console.log(`Inception Labs → ${body.model}`);
   const send = async (payload) => {
     const response = await fetch(CHAT_COMPLETIONS_URL, {
       method: 'POST',
       headers: {
-        Authorization: `Bearer ${apiKey}`,
+        Authorization: `Bearer ${token}`,
         'Content-Type': 'application/json'
       },
       body: JSON.stringify(payload)
@@ -196,8 +211,8 @@ async function inceptionRequest(apiKey, body) {
   let payload = body;
   let { response, data } = await send(payload);
 
-  // Не каждый OpenAI-compatible провайдер принимает reasoning/response_format — мягко деградируем.
-  for (const field of ['reasoning', 'response_format']) {
+  // Не каждый OpenAI-compatible провайдер принимает reasoning_effort/response_format — мягко деградируем.
+  for (const field of ['reasoning_effort', 'response_format']) {
     if (response.ok || !payload[field]) continue;
     const message = getProviderErrorMessage(data, response.status);
     const mayBeUnsupportedOptionalField = response.status === 400
@@ -211,6 +226,9 @@ async function inceptionRequest(apiKey, body) {
   if (!response.ok) {
     const message = getProviderErrorMessage(data, response.status);
     console.log('Inception Labs error:', message);
+    if (/missing authentication header/i.test(message)) {
+      throw new Error('Inception Labs не получил заголовок Authorization. Проверьте, что в поле вставлен именно API key Inception Labs без лишнего текста; префикс Bearer можно не писать.');
+    }
     if (/(model|модель)/i.test(message) && /not found|does not exist|not exist|unavailable|unsupported|invalid|недоступ|не найден/i.test(message)) {
       throw new Error(`Модель ${body.model} недоступна в Inception Labs: ${message}`);
     }
@@ -298,11 +316,10 @@ ipcMain.handle('ai:assist', async (_event, payload) => {
   }];
   if (screenshot) currentContent.push({ type: 'image_url', image_url: { url: screenshot } });
 
-  const data = await inceptionRequest(apiKey, {
+  const requestBody = {
     model: ASSIST_MODEL,
     temperature: 0.35,
-    max_tokens: 400,
-    reasoning: { effort: ASSIST_REASONING_EFFORT },
+    max_completion_tokens: 400,
     response_format: { type: 'json_object' },
     messages: [
       {
@@ -312,7 +329,12 @@ ipcMain.handle('ai:assist', async (_event, payload) => {
       ...context,
       { role: 'user', content: currentContent }
     ]
-  });
+  };
+  if (ASSIST_REASONING_EFFORT && ASSIST_REASONING_EFFORT !== 'none') {
+    requestBody.reasoning_effort = ASSIST_REASONING_EFFORT;
+  }
+
+  const data = await inceptionRequest(apiKey, requestBody);
   const raw = (data.choices?.[0]?.message?.content || '{}')
     .replace(/^```json\s*/i, '')
     .replace(/\s*```$/, '')

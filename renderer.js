@@ -44,7 +44,7 @@ $('style').value = localStorage.getItem('reply-style') || 'friendly and conversa
 renderSavedHistory();
 updateMeter(0);
 
-apiKeyInput.addEventListener('change', () => localStorage.setItem('inception-api-key', apiKeyInput.value.trim()));
+apiKeyInput.addEventListener('input', () => localStorage.setItem('inception-api-key', apiKeyInput.value.trim()));
 $('language').addEventListener('change', (event) => localStorage.setItem('target-language', event.target.value));
 $('style').addEventListener('change', (event) => localStorage.setItem('reply-style', event.target.value));
 toggleButton.addEventListener('click', () => (active ? stopListening() : startListening()));

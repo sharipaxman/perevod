@@ -5,82 +5,203 @@ const readline = require('readline');
 const path = require('path');
 
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
-const ASSIST_MODEL = 'openrouter/free';
-let transcriber = null;
-let transcriberQueue = Promise.resolve();
+const ASSIST_MODEL = process.env.ASSIST_MODEL || 'openai/gpt-6-sol';
+const ASSIST_REASONING_EFFORT = process.env.ASSIST_REASONING_EFFORT || 'none';
+const TRANSCRIBE_TIMEOUT_MS = 120000;
 
-async function openRouterRequest(apiKey, body) {
-  console.log('Sending request to OpenRouter, body:', JSON.stringify(body).substring(0, 200));
-  const response = await fetch(OPENROUTER_URL, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-      'X-Title': 'English Lesson Copilot'
-    },
-    body: JSON.stringify(body)
-  });
-  console.log('Response status:', response.status);
-  const data = await response.json();
-  if (!response.ok) {
-    console.log('Error response:', data);
-    const message = data.error?.message || '';
-    if (message.toLowerCase().includes('balance') && message.toLowerCase().includes('audio')) {
-      throw new Error('OpenRouter требует минимум $0.50 на балансе для распознавания аудио. Пополните баланс в панели OpenRouter или используйте локальное распознавание.');
-    }
-    throw new Error(message || 'Ошибка запроса к OpenRouter.');
+let transcriber = null;
+let transcriberStarting = null;
+let transcriberRequestId = 0;
+const transcriberPending = new Map();
+let transcriberLog = [];
+
+function rememberTranscriberLog(text) {
+  for (const line of String(text).split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (trimmed) transcriberLog.push(trimmed);
   }
-  return data;
+  transcriberLog = transcriberLog.slice(-25);
+}
+
+function describeTranscriberFailure(fallback) {
+  const log = transcriberLog.join('\n');
+  if (/No module named ['"]?faster_whisper/i.test(log)) {
+    return 'Не установлена faster-whisper. Выполни: python -m pip install -r requirements.txt';
+  }
+  if (/charmap|UnicodeEncodeError/i.test(log)) {
+    return 'Python выводит текст в неверной кодировке. Перезапусти приложение — теперь оно само включает UTF-8 (PYTHONUTF8=1).';
+  }
+  const lastMeaningful = [...transcriberLog].reverse().find((line) => !/^loading whisper|^whisper ready$/i.test(line));
+  return lastMeaningful || fallback;
+}
+
+function spawnTranscriber(command) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, ['-u', path.join(__dirname, 'transcriber.py')], {
+      windowsHide: true,
+      stdio: ['pipe', 'pipe', 'pipe'],
+      env: {
+        ...process.env,
+        // Без этого Windows пишет stdout в cp1251/cp866 и кириллица падает с 'charmap' codec.
+        PYTHONUTF8: '1',
+        PYTHONIOENCODING: 'utf-8',
+        PYTHONLEGACYWINDOWSSTDIO: '0'
+      }
+    });
+    child.once('spawn', () => resolve(child));
+    child.once('error', reject);
+  });
+}
+
+function attachTranscriber(child) {
+  child.stdout.setEncoding('utf8');
+  child.stderr.setEncoding('utf8');
+
+  const output = readline.createInterface({ input: child.stdout });
+  output.on('line', (line) => {
+    const trimmed = line.trim();
+    if (!trimmed) return;
+    let data;
+    try {
+      data = JSON.parse(trimmed);
+    } catch {
+      rememberTranscriberLog(trimmed);
+      return;
+    }
+    // Ответ адресуется по id; если id нет — отдаём самому старому запросу.
+    const key = transcriberPending.has(data.id) ? data.id : transcriberPending.keys().next().value;
+    const request = transcriberPending.get(key);
+    if (!request) return;
+    transcriberPending.delete(key);
+    clearTimeout(request.timeout);
+    if (data.error) request.reject(new Error(data.error));
+    else request.resolve(typeof data.text === 'string' ? data.text.trim() : '');
+  });
+
+  child.stderr.on('data', (chunk) => {
+    rememberTranscriberLog(chunk);
+    console.error(`Whisper: ${String(chunk).trim()}`);
+  });
+
+  const fail = (reason) => {
+    transcriber = null;
+    output.close();
+    for (const [, request] of transcriberPending) {
+      clearTimeout(request.timeout);
+      request.reject(new Error(reason));
+    }
+    transcriberPending.clear();
+  };
+
+  child.on('exit', (code, signal) => fail(describeTranscriberFailure(`процесс Python завершился (code=${code}, signal=${signal}).`)));
+  child.on('error', (error) => fail(error.message));
+}
+
+async function ensureTranscriber() {
+  if (transcriber && !transcriber.killed && transcriber.exitCode === null) return transcriber;
+  if (transcriberStarting) return transcriberStarting;
+
+  transcriberStarting = (async () => {
+    const candidates = [process.env.PYTHON_EXECUTABLE, 'python', 'python3', 'py'].filter(Boolean);
+    let lastError = null;
+    for (const command of candidates) {
+      try {
+        const child = await spawnTranscriber(command);
+        console.log(`Whisper: запущен через "${command}"`);
+        transcriberLog = [];
+        attachTranscriber(child);
+        transcriber = child;
+        return child;
+      } catch (error) {
+        lastError = error;
+      }
+    }
+    throw new Error(`Python не найден (${lastError?.message || 'нет исполняемого файла'}). Запусти приложение из активной venv или задай переменную PYTHON_EXECUTABLE.`);
+  })();
+
+  try {
+    return await transcriberStarting;
+  } finally {
+    transcriberStarting = null;
+  }
 }
 
 async function transcribeLocally(bytes, mimeType) {
-  console.log('Transcribing locally with bytes:', bytes.length);
   const extension = (mimeType || 'audio/webm').includes('ogg') ? '.ogg' : '.webm';
   const tempDirectory = await fs.mkdtemp(path.join(app.getPath('temp'), 'english-lesson-'));
   const audioPath = path.join(tempDirectory, `segment${extension}`);
   try {
     await fs.writeFile(audioPath, Buffer.from(bytes));
-    if (!transcriber) {
-      const python = process.env.PYTHON_EXECUTABLE || 'python';
-      transcriber = spawn(python, ['-u', path.join(__dirname, 'transcriber.py')], {
-        windowsHide: true,
-        stdio: ['pipe', 'pipe', 'pipe']
-      });
-      transcriber.stderr.on('data', (chunk) => console.error(`Whisper: ${chunk}`));
-      transcriber.on('exit', () => { transcriber = null; });
-    }
+    const child = await ensureTranscriber();
+    const id = ++transcriberRequestId;
 
-    const result = await new Promise((resolve, reject) => {
-      transcriberQueue = transcriberQueue.then(() => new Promise((queueResolve, queueReject) => {
-        const output = readline.createInterface({ input: transcriber.stdout });
-        const onLine = (line) => {
-          output.close();
-          try {
-            const data = JSON.parse(line);
-            if (data.error) queueReject(new Error(data.error));
-            else queueResolve(data.text?.trim() || '');
-          } catch (error) {
-            queueReject(error);
-          }
-        };
-        output.once('line', onLine);
-        transcriber.once('error', queueReject);
-        transcriber.stdin.write(`${audioPath}\n`);
-      })).then(resolve, reject);
+    return await new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        transcriberPending.delete(id);
+        reject(new Error('Python не ответил за 2 минуты. Возможно, скачивается модель Whisper — попробуй ещё раз.'));
+      }, TRANSCRIBE_TIMEOUT_MS);
+      transcriberPending.set(id, { resolve, reject, timeout });
+      child.stdin.write(`${JSON.stringify({ id, path: audioPath })}\n`, (error) => {
+        if (!error) return;
+        transcriberPending.delete(id);
+        clearTimeout(timeout);
+        reject(error);
+      });
     });
-    return result;
   } catch (error) {
     if (error.code === 'ENOENT') {
       throw new Error('Python не найден. Запусти приложение из активной venv или задай PYTHON_EXECUTABLE.');
     }
-    const details = error.stderr?.trim() || error.message;
+    const details = (error.message || '').trim();
     if (details.includes('No module named') && details.includes('faster_whisper')) {
-      throw new Error('Не установлена faster-whisper. Выполни: pip install -r requirements.txt');
+      throw new Error('Не установлена faster-whisper. Выполни: python -m pip install -r requirements.txt');
     }
     throw new Error(`Локальное распознавание не удалось: ${details}`);
   } finally {
-    await fs.rm(tempDirectory, { recursive: true, force: true });
+    await fs.rm(tempDirectory, { recursive: true, force: true }).catch(() => {});
   }
+}
+
+async function openRouterRequest(apiKey, body) {
+  console.log(`OpenRouter → ${body.model}`);
+  const send = async (payload) => {
+    const response = await fetch(OPENROUTER_URL, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+        'HTTP-Referer': 'https://github.com/sharipaxman/perevod',
+        'X-Title': 'English Lesson Copilot'
+      },
+      body: JSON.stringify(payload)
+    });
+    const data = await response.json().catch(() => ({}));
+    return { response, data };
+  };
+
+  let { response, data } = await send(body);
+
+  // Не каждый провайдер принимает reasoning/response_format — мягко деградируем.
+  if (!response.ok && body.reasoning) {
+    const message = String(data.error?.message || '');
+    if (/reasoning|effort/i.test(message) || response.status === 400) {
+      const { reasoning, ...withoutReasoning } = body;
+      ({ response, data } = await send(withoutReasoning));
+    }
+  }
+
+  if (!response.ok) {
+    const message = data.error?.message || `HTTP ${response.status}`;
+    console.log('OpenRouter error:', message);
+    if (/no endpoints|not exist|no allowed providers/i.test(message)) {
+      throw new Error(`Модель ${body.model} недоступна для этого ключа: ${message}`);
+    }
+    if (/balance|credit/i.test(message)) {
+      throw new Error(`OpenRouter отклонил запрос из-за баланса: ${message}`);
+    }
+    throw new Error(message || 'Ошибка запроса к OpenRouter.');
+  }
+  return data;
 }
 
 function createWindow() {
@@ -122,9 +243,18 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
 });
 
+app.on('before-quit', () => {
+  if (transcriber) {
+    try { transcriber.stdin.end(); } catch { /* уже закрыт */ }
+    transcriber.kill();
+    transcriber = null;
+  }
+});
+
 ipcMain.handle('ai:transcribe', async (_event, payload) => {
-  const { apiKey, bytes, mimeType } = payload;
-  if (!apiKey) throw new Error('Добавьте OpenRouter API key в настройках.');
+  // Распознавание локальное — ключ здесь не нужен, он требуется только для перевода.
+  const { bytes, mimeType } = payload;
+  if (!bytes?.length) throw new Error('Пустой аудиофрагмент.');
   return transcribeLocally(bytes, mimeType);
 });
 
@@ -153,6 +283,8 @@ ipcMain.handle('ai:assist', async (_event, payload) => {
   const data = await openRouterRequest(apiKey, {
     model: ASSIST_MODEL,
     temperature: 0.35,
+    max_tokens: 400,
+    reasoning: { effort: ASSIST_REASONING_EFFORT },
     response_format: { type: 'json_object' },
     messages: [
       {

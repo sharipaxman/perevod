@@ -40,3 +40,7 @@ button:disabled { opacity:.55; cursor:wait; }
 .error { color:#ff91a4; border-color:#633043; }
 @keyframes rise { from { opacity:0; transform:translateY(8px); } }
 @media (max-width:900px) { main { grid-template-columns:1fr; } .controls { position:static; } header { flex-direction:column; } }
+.meter { margin-top:14px; height:8px; border-radius:999px; background:#0b1221; border:1px solid var(--border); overflow:hidden; }
+.meter-fill { height:100%; width:0; border-radius:999px; background:#38507e; transition:width .1s linear, background .15s ease; }
+.meter-fill.hot { background:linear-gradient(90deg,var(--mint),var(--blue)); }
+.meter-label { margin-top:7px; }

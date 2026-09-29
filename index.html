@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>English Lesson Copilot</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <header>
+      <div>
+        <p class="eyebrow">LIVE LESSON ASSISTANT</p>
+        <h1>English Lesson Copilot</h1>
+        <p class="subtitle">Слушает системный звук, переводит речь преподавателя и предлагает ответы.</p>
+      </div>
+      <div id="status" class="status"><span></span><b>Остановлено</b></div>
+    </header>
+
+    <main>
+      <section class="panel controls">
+        <label>OpenRouter API key
+          <input id="apiKey" type="password" placeholder="sk-…" autocomplete="off" />
+        </label>
+        <label>Язык перевода
+          <select id="language">
+            <option value="Russian">Русский</option>
+            <option value="Spanish">Español</option>
+            <option value="German">Deutsch</option>
+            <option value="French">Français</option>
+          </select>
+        </label>
+        <label>Стиль ответа
+          <select id="style">
+            <option value="friendly and conversational">Дружелюбный</option>
+            <option value="concise and neutral">Краткий</option>
+            <option value="formal and polite">Формальный</option>
+          </select>
+        </label>
+        <button id="toggle" class="primary">Начать слушать</button>
+        <button id="cut" class="ghost">Обрезать</button>
+        <button id="clear" class="ghost">Очистить историю</button>
+        <p class="hint">Ключ хранится локально. Ctrl+Shift+S — снимок экрана к следующей фразе, Ctrl+Shift+C — очистить контекст, Ctrl+Shift+H — очистить историю.</p>
+      </section>
+
+      <section class="workspace">
+        <div id="empty" class="empty panel">
+          <div class="wave">◖ııı◗</div>
+          <h2>Готово к уроку</h2>
+          <p>Запустите видеоурок, нажмите «Начать слушать» и разрешите захват экрана со звуком.</p>
+        </div>
+        <div id="history" class="history"></div>
+      </section>
+    </main>
+  </div>
+  <template id="entryTemplate">
+    <article class="entry panel">
+      <div class="entry-time"></div>
+      <div class="block heard"><span>УСЛЫШАНО</span><p></p></div>
+      <div class="block translation"><span>ПЕРЕВОД</span><p></p></div>
+      <div class="block"><span>ВАРИАНТЫ ОТВЕТА</span><div class="replies"></div></div>
+    </article>
+  </template>
+  <script src="renderer.js"></script>
+</body>
+</html>

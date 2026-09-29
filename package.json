@@ -1,0 +1,13 @@
+{
+  "name": "english-lesson-copilot",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Desktop assistant that translates system audio and suggests replies",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "devDependencies": {
+    "electron": "^38.0.0"
+  }
+}
